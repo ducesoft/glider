@@ -36,13 +36,13 @@ type FwdrGroup struct {
 }
 
 // NewFwdrGroup returns a new forward group.
-func NewFwdrGroup(rulePath string, s []string, c *Strategy) *FwdrGroup {
+func NewFwdrGroup(rulePath string, s []string, c *Strategy) (*FwdrGroup, error) {
 	var fwdrs []*Forwarder
 	for _, chain := range s {
 		fwdr, err := ForwarderFromURL(chain, c.IntFace,
 			time.Duration(c.DialTimeout)*time.Second, time.Duration(c.RelayTimeout)*time.Second)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 		fwdr.SetMaxFailures(uint32(c.MaxFailures))
 		fwdrs = append(fwdrs, fwdr)
@@ -53,14 +53,14 @@ func NewFwdrGroup(rulePath string, s []string, c *Strategy) *FwdrGroup {
 		direct, err := DirectForwarder(c.IntFace,
 			time.Duration(c.DialTimeout)*time.Second, time.Duration(c.RelayTimeout)*time.Second)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 		fwdrs = append(fwdrs, direct)
 		c.Strategy = "rr"
 	}
 
 	name := strings.TrimSuffix(filepath.Base(rulePath), filepath.Ext(rulePath))
-	return newFwdrGroup(name, fwdrs, c)
+	return newFwdrGroup(name, fwdrs, c), nil
 }
 
 // newFwdrGroup returns a new FwdrGroup.

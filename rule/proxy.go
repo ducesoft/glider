@@ -12,19 +12,32 @@ import (
 
 // Proxy implements the proxy.Proxy interface with rule support.
 type Proxy struct {
-	main      *FwdrGroup
-	all       []*FwdrGroup
-	domainMap sync.Map
-	ipMap     sync.Map
-	cidrMap   sync.Map
+	main          *FwdrGroup
+	all           []*FwdrGroup
+	domainMap     sync.Map
+	ipMap         sync.Map
+	cidrMap       sync.Map
+	authenticator proxy.Authenticator
 }
 
 // NewProxy returns a new rule proxy.
-func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) *Proxy {
-	rd := &Proxy{main: NewFwdrGroup("main", mainForwarders, mainStrategy)}
+func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) (*Proxy, error) {
+	return NewProxyWithAuth(mainForwarders, mainStrategy, rules, nil)
+}
+
+// NewProxyWithAuth returns a new rule proxy.
+func NewProxyWithAuth(mainForwarders []string, mainStrategy *Strategy, rules []*Config, authenticator proxy.Authenticator) (*Proxy, error) {
+	main, err := NewFwdrGroup("main", mainForwarders, mainStrategy)
+	if nil != err {
+		return nil, err
+	}
+	rd := &Proxy{main: main, authenticator: authenticator}
 
 	for _, r := range rules {
-		group := NewFwdrGroup(r.RulePath, r.Forward, &r.Strategy)
+		group, err := NewFwdrGroup(r.RulePath, r.Forward, &r.Strategy)
+		if nil != err {
+			return nil, err
+		}
 		rd.all = append(rd.all, group)
 
 		for _, domain := range r.Domain {
@@ -50,7 +63,10 @@ func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) 
 		}
 	}
 
-	direct := NewFwdrGroup("", nil, mainStrategy)
+	direct, err := NewFwdrGroup("", nil, mainStrategy)
+	if nil != err {
+		return nil, err
+	}
 	rd.domainMap.Store("direct", direct)
 
 	// if there's any forwarder defined in main config, make sure they will be accessed directly.
@@ -64,7 +80,7 @@ func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) 
 		}
 	}
 
-	return rd
+	return rd, nil
 }
 
 // Dial dials to targer addr and return a conn.
@@ -153,4 +169,19 @@ func (p *Proxy) Check() {
 	for _, fwdrGroup := range p.all {
 		fwdrGroup.Check()
 	}
+}
+
+func (p *Proxy) Authenticator() proxy.Authenticator {
+	return p.authenticator
+}
+
+func (p *Proxy) DialAuth(network, addr string, user string, password string) (net.Conn, proxy.Dialer, error) {
+	nd := p.findDialer(addr).NextDialer(addr)
+	c, err := func() (net.Conn, error) {
+		if ad, ok := nd.(proxy.AuthDialer); ok && nil != p.authenticator && p.authenticator.PassthroughAuth() {
+			return ad.DialAuth(network, addr, user, password)
+		}
+		return nd.Dial(network, addr)
+	}()
+	return c, nd, err
 }

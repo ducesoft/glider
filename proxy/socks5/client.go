@@ -32,13 +32,18 @@ func (s *Socks5) Addr() string {
 
 // Dial connects to the address addr on the network net via the SOCKS5 proxy.
 func (s *Socks5) Dial(network, addr string) (net.Conn, error) {
+	return s.DialAuth(network, addr, s.user, s.password)
+}
+
+// Dial connects to the address addr on the network net via the SOCKS5 proxy.
+func (s *Socks5) DialAuth(network, addr, user, password string) (net.Conn, error) {
 	c, err := s.dial(network, s.addr)
 	if err != nil {
 		log.F("[socks5]: dial to %s error: %s", s.addr, err)
 		return nil, err
 	}
 
-	if _, err := s.connect(c, addr, socks.CmdConnect); err != nil {
+	if _, err := s.connect(c, addr, socks.CmdConnect, user, password); err != nil {
 		c.Close()
 		return nil, err
 	}
@@ -71,7 +76,7 @@ func (s *Socks5) DialUDP(network, addr string) (pc net.PacketConn, err error) {
 	}
 
 	var uAddr socks.Addr
-	if uAddr, err = s.connect(c, addr, socks.CmdUDPAssociate); err != nil {
+	if uAddr, err = s.connect(c, addr, socks.CmdUDPAssociate, s.user, s.password); err != nil {
 		c.Close()
 		return nil, err
 	}
@@ -106,13 +111,13 @@ func (s *Socks5) DialUDP(network, addr string) (pc net.PacketConn, err error) {
 // connect takes an existing connection to a socks5 proxy server,
 // and commands the server to extend that connection to target,
 // which must be a canonical address with a host and port.
-func (s *Socks5) connect(conn net.Conn, target string, cmd byte) (addr socks.Addr, err error) {
+func (s *Socks5) connect(conn net.Conn, target string, cmd byte, user string, password string) (addr socks.Addr, err error) {
 	// the size here is just an estimate
 	buf := pool.GetBuffer(socks.MaxAddrLen)
 	defer pool.PutBuffer(buf)
 
 	buf = append(buf[:0], Version)
-	if len(s.user) > 0 && len(s.user) < 256 && len(s.password) < 256 {
+	if len(user) > 0 && len(user) < 256 && len(password) < 256 {
 		buf = append(buf, 2 /* num auth methods */, socks.AuthNone, socks.AuthPassword)
 	} else {
 		buf = append(buf, 1 /* num auth methods */, socks.AuthNone)
@@ -135,10 +140,10 @@ func (s *Socks5) connect(conn net.Conn, target string, cmd byte) (addr socks.Add
 	if buf[1] == socks.AuthPassword {
 		buf = buf[:0]
 		buf = append(buf, 1 /* password protocol version */)
-		buf = append(buf, uint8(len(s.user)))
-		buf = append(buf, s.user...)
-		buf = append(buf, uint8(len(s.password)))
-		buf = append(buf, s.password...)
+		buf = append(buf, uint8(len(user)))
+		buf = append(buf, user...)
+		buf = append(buf, uint8(len(password)))
+		buf = append(buf, password...)
 
 		if _, err := conn.Write(buf); err != nil {
 			return addr, errors.New("proxy: failed to write authentication request to SOCKS5 proxy at " + s.addr + ": " + err.Error())

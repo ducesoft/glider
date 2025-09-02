@@ -66,24 +66,24 @@ func (s *HTTP) Serve(cc net.Conn) {
 
 func (s *HTTP) servRequest(req *request, c *proxy.Conn) {
 	// Auth
-	if s.user != "" && s.password != "" {
-		if user, pass, ok := extractUserPass(req.auth); !ok || user != s.user || pass != s.password {
-			io.WriteString(c, "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic\r\n\r\n")
-			log.F("[http] auth failed from %s, auth info: %s:%s", c.RemoteAddr(), user, pass)
-			return
-		}
-	}
-
-	if req.method == "CONNECT" {
-		s.servHTTPS(req, c)
+	user, pass, ok := extractUserPass(req.auth)
+	if ((s.user != "" && s.password != "") && (!ok || user != s.user || pass != s.password)) ||
+		(nil != s.proxy.Authenticator() && !s.proxy.Authenticator().Auth(user, pass)) {
+		io.WriteString(c, "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic\r\n\r\n")
+		log.F("[http] auth failed from %s, auth info: %s:%s", c.RemoteAddr(), user, pass)
 		return
 	}
 
-	s.servHTTP(req, c)
+	if req.method == "CONNECT" {
+		s.servHTTPS(req, c, user, pass)
+		return
+	}
+
+	s.servHTTP(req, c, user, pass)
 }
 
-func (s *HTTP) servHTTPS(r *request, c net.Conn) {
-	rc, dialer, err := s.proxy.Dial("tcp", r.uri)
+func (s *HTTP) servHTTPS(r *request, c net.Conn, user string, pass string) {
+	rc, dialer, err := s.proxy.DialAuth("tcp", r.uri, user, pass)
 	if err != nil {
 		io.WriteString(c, r.proto+" 502 ERROR\r\n\r\n")
 		log.F("[http] %s <-> %s [c] via %s, error in dial: %v", c.RemoteAddr(), r.uri, dialer.Addr(), err)
@@ -104,8 +104,8 @@ func (s *HTTP) servHTTPS(r *request, c net.Conn) {
 	}
 }
 
-func (s *HTTP) servHTTP(req *request, c *proxy.Conn) {
-	rc, dialer, err := s.proxy.Dial("tcp", req.target)
+func (s *HTTP) servHTTP(req *request, c *proxy.Conn, user string, pass string) {
+	rc, dialer, err := s.proxy.DialAuth("tcp", req.target, user, pass)
 	if err != nil {
 		fmt.Fprintf(c, "%s 502 ERROR\r\n\r\n", req.proto)
 		log.F("[http] %s <-> %s via %s, error in dial: %v", c.RemoteAddr(), req.target, dialer.Addr(), err)

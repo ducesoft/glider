@@ -7,17 +7,36 @@ import (
 
 // Proxy is a dialer manager.
 type Proxy interface {
+
 	// Dial connects to the given address via the proxy.
 	Dial(network, addr string) (c net.Conn, dialer Dialer, err error)
 
 	// DialUDP connects to the given address via the proxy.
 	DialUDP(network, addr string) (pc net.PacketConn, dialer UDPDialer, err error)
 
-	// Get the dialer by dstAddr.
+	// NextDialer Get the dialer by dstAddr.
 	NextDialer(dstAddr string) Dialer
 
 	// Record records result while using the dialer from proxy.
 	Record(dialer Dialer, success bool)
+
+	// Authenticator extension, maybe nil
+	Authenticator() Authenticator
+
+	// DialAuth connects to the given address via the proxy.
+	DialAuth(network, addr string, user string, password string) (c net.Conn, dialer Dialer, err error)
+}
+
+type Authenticator interface {
+	// Auth extension
+	Auth(username, password string) bool
+	// PassthroughAuth the username and password
+	PassthroughAuth() bool
+}
+
+type AuthDialer interface {
+	// DialAuth connects to the given address via the proxy.
+	DialAuth(network, addr string, user string, password string) (net.Conn, error)
 }
 
 var (

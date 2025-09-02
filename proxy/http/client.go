@@ -26,6 +26,11 @@ func (s *HTTP) Addr() string {
 
 // Dial connects to the address addr on the network net via the proxy.
 func (s *HTTP) Dial(network, addr string) (net.Conn, error) {
+	return s.DialAuth(network, addr, s.user, s.password)
+}
+
+// DialAuth connects to the address addr on the network net via the proxy.
+func (s *HTTP) DialAuth(network, addr, user, password string) (net.Conn, error) {
 	rc, err := s.dialer.Dial(network, s.addr)
 	if err != nil {
 		log.F("[http] dial to %s error: %s", s.addr, err)
@@ -39,8 +44,8 @@ func (s *HTTP) Dial(network, addr string) (net.Conn, error) {
 	buf.WriteString("Host: " + addr + "\r\n")
 	buf.WriteString("Proxy-Connection: Keep-Alive\r\n")
 
-	if s.user != "" && s.password != "" {
-		auth := s.user + ":" + s.password
+	if user != "" && password != "" {
+		auth := user + ":" + password
 		buf.WriteString("Proxy-Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(auth)) + "\r\n")
 	}
 
