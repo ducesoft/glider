@@ -20,11 +20,18 @@ type Proxy struct {
 }
 
 // NewProxy returns a new rule proxy.
-func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) *Proxy {
-	rd := &Proxy{main: NewFwdrGroup("main", mainForwarders, mainStrategy)}
+func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) (*Proxy, error) {
+	main, err := NewFwdrGroup("main", mainForwarders, mainStrategy)
+	if nil != err {
+		return nil, err
+	}
+	rd := &Proxy{main: main}
 
 	for _, r := range rules {
-		group := NewFwdrGroup(r.RulePath, r.Forward, &r.Strategy)
+		group, err := NewFwdrGroup(r.RulePath, r.Forward, &r.Strategy)
+		if nil != err {
+			return nil, err
+		}
 		rd.all = append(rd.all, group)
 
 		for _, domain := range r.Domain {
@@ -50,7 +57,10 @@ func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) 
 		}
 	}
 
-	direct := NewFwdrGroup("", nil, mainStrategy)
+	direct, err := NewFwdrGroup("", nil, mainStrategy)
+	if nil != err {
+		return nil, err
+	}
 	rd.domainMap.Store("direct", direct)
 
 	// if there's any forwarder defined in main config, make sure they will be accessed directly.
@@ -64,7 +74,7 @@ func NewProxy(mainForwarders []string, mainStrategy *Strategy, rules []*Config) 
 		}
 	}
 
-	return rd
+	return rd, nil
 }
 
 // Dial dials to targer addr and return a conn.
