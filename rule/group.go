@@ -226,7 +226,11 @@ func (p *FwdrGroup) Check() {
 	log.F("[group] %s: using check config: %s", p.name, p.config.Check)
 
 	for i := range p.fwdrs {
-		go p.check(p.fwdrs[i], checker)
+		if p.config.Async {
+			go p.check(p.fwdrs[i], checker)
+		} else {
+			p.check(p.fwdrs[i], checker)
+		}
 	}
 }
 
@@ -234,7 +238,11 @@ func (p *FwdrGroup) check(fwdr *Forwarder, checker Checker) {
 	wait := uint8(0)
 	intval := time.Duration(p.config.CheckInterval) * time.Second
 
-	for {
+	var once bool
+	for !once {
+		if !p.config.Async {
+			once = true
+		}
 		time.Sleep(intval * time.Duration(wait))
 
 		// check all forwarders at least one time

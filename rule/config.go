@@ -35,6 +35,7 @@ type Strategy struct {
 	DialTimeout         int
 	RelayTimeout        int
 	IntFace             string
+	Async               bool
 }
 
 // NewConfFromFile returns a new config from file.
