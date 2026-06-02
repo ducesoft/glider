@@ -2,7 +2,9 @@ package rule
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
+	"io"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -191,52 +193,56 @@ func (p *FwdrGroup) Check() {
 		log.F("[group] %s: only 1 forwarder found, disable health checking", p.name)
 		return
 	}
-
-	if !strings.Contains(p.config.Check, "://") {
-		p.config.Check += "://"
+	for i := range p.fwdrs {
+		if p.config.Async {
+			go p.check(p.fwdrs[i])
+		} else {
+			p.check(p.fwdrs[i])
+		}
 	}
+}
 
-	u, err := url.Parse(p.config.Check)
+func (p *FwdrGroup) checker(fwdr *Forwarder) (Checker, error) {
+	u, err := func() (*url.URL, error) {
+		if nil == p.config.Checklist || "" == p.config.Checklist[fwdr.url] {
+			return url.Parse(p.config.Check)
+		}
+		return url.Parse(p.config.Checklist[fwdr.url])
+	}()
 	if err != nil {
-		log.F("[group] %s: parse check config error: %s, disable health checking", p.name, err)
-		return
+		return nil, fmt.Errorf("[group] %s: parse check config error: %s, disable health checking", p.name, err)
 	}
+	log.F("[group] %s: using check config: %s", p.name, u.String())
 
 	addr := u.Host
 	timeout := time.Duration(p.config.CheckTimeout) * time.Second
 
-	var checker Checker
 	switch u.Scheme {
 	case "tcp":
-		checker = newTcpChecker(addr, timeout)
+		return newTcpChecker(addr, timeout), nil
 	case "http", "https":
 		expect := "HTTP" // default: check the first 4 chars in response
 		params, _ := url.ParseQuery(u.Fragment)
 		if ex := params.Get("expect"); ex != "" {
 			expect = ex
 		}
-		checker = newHttpChecker(addr, u.RequestURI(), expect, timeout, u.Scheme == "https")
+		return newHttpChecker(addr, u.RequestURI(), expect, timeout, u.Scheme == "https"), nil
 	case "file":
-		checker = newFileChecker(u.Host + u.Path)
+		return newFileChecker(u.Host + u.Path), nil
 	default:
-		log.F("[group] %s: unknown scheme in check config `%s`, disable health checking", p.name, p.config.Check)
-		return
-	}
-
-	log.F("[group] %s: using check config: %s", p.name, p.config.Check)
-
-	for i := range p.fwdrs {
-		if p.config.Async {
-			go p.check(p.fwdrs[i], checker)
-		} else {
-			p.check(p.fwdrs[i], checker)
-		}
+		return nil, fmt.Errorf("[group] %s: unknown scheme in check config `%s`, disable health checking", p.name, p.config.Check)
 	}
 }
 
-func (p *FwdrGroup) check(fwdr *Forwarder, checker Checker) {
+func (p *FwdrGroup) check(fwdr *Forwarder) {
 	wait := uint8(0)
 	intval := time.Duration(p.config.CheckInterval) * time.Second
+
+	checker, err := p.checker(fwdr)
+	if nil != err {
+		log.F("[group] %s: has no checker: %s", p.name, err)
+		return
+	}
 
 	var once bool
 	for !once {
@@ -255,7 +261,7 @@ func (p *FwdrGroup) check(fwdr *Forwarder, checker Checker) {
 		}
 
 		elapsed, err := checker.Check(fwdr)
-		if err != nil {
+		if err != nil && !errors.Is(err, io.EOF) {
 			if errors.Is(err, proxy.ErrNotSupported) {
 				fwdr.SetMaxFailures(0)
 				log.F("[check] %s: %s(%d), %s, stop checking", p.name, fwdr.Addr(), fwdr.Priority(), err)

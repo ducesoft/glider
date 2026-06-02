@@ -36,6 +36,7 @@ type Strategy struct {
 	RelayTimeout        int
 	IntFace             string
 	Async               bool
+	Checklist           map[string]string
 }
 
 // NewConfFromFile returns a new config from file.
